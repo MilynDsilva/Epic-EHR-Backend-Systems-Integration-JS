@@ -8,7 +8,7 @@ const fs = require('fs');
 
 /* Read environment variables */
 const CLIENT_ID = process.env.EPIC_CLIENT_ID;
-const ISSUER = process.env.ISSUER; /* Often the same as the client_id */
+const ISSUER = process.env.ISSUER; // Often the same as the client_id
 const PRIVATE_KEY_PATH = process.env.PRIVATE_KEY_PATH;
 const PRIVATE_KEY = fs.readFileSync(PRIVATE_KEY_PATH, 'utf8');
 const PORT = process.env.PORT || 3000;
@@ -24,9 +24,9 @@ function generateJWT() {
     const payload = {
         iss: ISSUER,
         sub: CLIENT_ID,
-        aud: EPIC_TOKEN_URL, /* Audience should be the token endpoint */
-        exp: Math.floor(Date.now() / 1000) + 300, /* Expires in 5 minutes */
-        jti: Math.random().toString(36).substring(2) /* Unique JWT ID */
+        aud: EPIC_TOKEN_URL, // Audience should be the token endpoint
+        exp: Math.floor(Date.now() / 1000) + 300, // Expires in 5 minutes
+        jti: Math.random().toString(36).substring(2) // Unique JWT ID
     };
 
     console.log('JWT Payload:', payload);
@@ -41,7 +41,7 @@ function generateJWT() {
 async function getAccessToken() {
     const jwtToken = generateJWT();
 
-    /* Parameters for JWT client assertion flow */
+    // Parameters for JWT client assertion flow
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
     params.append('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
@@ -67,7 +67,7 @@ async function getAccessToken() {
 }
 
 /*
-   Step 3: Call Epic FHIR APIs using GET requests
+   Helper function: Call Epic FHIR APIs using GET requests
 */
 async function callEpicAPI(endpoint, accessToken) {
     try {
@@ -113,9 +113,7 @@ async function callEpicAPIPatientMatch(matchParameters, accessToken) {
 
 const app = express();
 
-/* 
-   IMPORTANT: Use body-parsing middleware
-*/
+// IMPORTANT: Use body-parsing middleware
 app.use(express.json());
 
 /* GET /patient
@@ -156,7 +154,7 @@ app.post('/patient-match', async (req, res) => {
 
         // matchParameters (FHIR "Parameters" resource) should be in the request body as JSON
         const matchParameters = req.body;
-        console.log(req.body, "request");
+        console.log('Request Body:', req.body);
         const matchResults = await callEpicAPIPatientMatch(matchParameters, accessToken);
 
         res.json({
@@ -176,9 +174,9 @@ app.post('/patient-match', async (req, res) => {
 
 /* GET /patient-search
    Allows the client to search for patients using query parameters.
-   The query parameters are passed directly to the Epic FHIR search endpoint.
-    Query: ?family=Lopez&gender=Female&telecom=469-555-5555
-   */
+   Example query: ?family=Lopez&gender=Female&telecom=469-555-5555
+   ?family=Mychart&gender=Female&telecom=608-123-4567
+*/
 app.get('/patient-search', async (req, res) => {
     try {
         const accessToken = await getAccessToken();
@@ -187,7 +185,7 @@ app.get('/patient-search', async (req, res) => {
         // Build a query string from the incoming query parameters
         const queryParams = new URLSearchParams(req.query).toString();
         const endpoint = `Patient?${queryParams}`;
-        console.log('Search Endpoint:', endpoint);
+        console.log('Patient Search Endpoint:', endpoint);
 
         const searchResults = await callEpicAPI(endpoint, accessToken);
 
@@ -201,6 +199,75 @@ app.get('/patient-search', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error searching patient',
+            error: error.response ? error.response.data : error.message
+        });
+    }
+});
+
+/* GET /appointments
+   Allows the client to search for appointments for a patient using query parameters.
+   Accepted query parameters include:
+     - patient (required): The patient FHIR ID reference.
+     - date: Appointment date.
+     - identifier: Appointment identifier (CSN).
+     - status: Appointment status.
+     - service-category: The type of appointment (should be "appointment" if specified).
+     ?patient=erXuFYUfucBZaryVksYEcMg3&service-category=appointment&date=2017-10-06
+     or category = surgery
+*/
+app.get('/appointments', async (req, res) => {
+    try {
+        const accessToken = await getAccessToken();
+        console.log('Access Token:', accessToken);
+
+        // Build the query string from incoming query parameters
+        const queryParams = new URLSearchParams(req.query).toString();
+        const endpoint = `Appointment?${queryParams}`;
+        console.log('Appointment Search Endpoint:', endpoint);
+
+        const appointmentResults = await callEpicAPI(endpoint, accessToken);
+
+        res.json({
+            success: true,
+            message: 'Appointment search results retrieved successfully',
+            data: appointmentResults
+        });
+    } catch (error) {
+        console.error('Error in /appointments route:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error retrieving appointments',
+            error: error.response ? error.response.data : error.message
+        });
+    }
+});
+
+/* GET /scheduled-surgery/:id
+   Allows the client to read a scheduled surgical appointment (read for scheduled surgeries).
+   This endpoint uses the Appointment.Read API, which is designed for scheduled surgical procedures.
+*/
+app.get('/scheduled-surgery/:id', async (req, res) => {
+    try {
+        const accessToken = await getAccessToken();
+        console.log('Access Token:', accessToken);
+
+        // Get the surgery (appointment) ID from the URL parameter
+        const surgeryId = req.params.id;
+        const endpoint = `Appointment/${surgeryId}`;
+        console.log('Scheduled Surgery Read Endpoint:', endpoint);
+
+        const surgeryData = await callEpicAPI(endpoint, accessToken);
+
+        res.json({
+            success: true,
+            message: 'Scheduled surgery appointment retrieved successfully',
+            data: surgeryData
+        });
+    } catch (error) {
+        console.error('Error in /scheduled-surgery route:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error retrieving scheduled surgery appointment',
             error: error.response ? error.response.data : error.message
         });
     }
