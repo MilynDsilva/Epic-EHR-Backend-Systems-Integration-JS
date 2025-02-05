@@ -15,7 +15,10 @@ const PORT = process.env.PORT || 3000;
 
 /* Epic endpoints (these could also come from .env if desired) */
 const EPIC_TOKEN_URL = 'https://fhir.epic.com/interconnect-fhir-oauth/oauth2/token';
+// R4 base endpoint for most operations including Observation.Create
 const EPIC_FHIR_URL = 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4';
+// STU3 base endpoint for Appointment $find operation
+const EPIC_STU3_FHIR_URL = 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/STU3';
 
 /*
    Step 1: Generate a JWT for the client assertion
@@ -67,7 +70,7 @@ async function getAccessToken() {
 }
 
 /*
-   Helper function: Call Epic FHIR APIs using GET requests
+   Helper function: Call Epic FHIR APIs using GET requests (for R4 endpoints)
 */
 async function callEpicAPI(endpoint, accessToken) {
     try {
@@ -88,8 +91,7 @@ async function callEpicAPI(endpoint, accessToken) {
 }
 
 /*
-   Step 3b: Call Epic FHIR API for Patient $match (POST)
-   This function will POST the provided matchParameters to /Patient/$match
+   Helper function: Call Epic FHIR API for Patient $match (POST)
 */
 async function callEpicAPIPatientMatch(matchParameters, accessToken) {
     try {
@@ -105,6 +107,30 @@ async function callEpicAPIPatientMatch(matchParameters, accessToken) {
     } catch (error) {
         console.error(
             'Error calling Epic API (Patient $match):',
+            error.response ? error.response.data : error.message
+        );
+        throw error;
+    }
+}
+
+/*
+   Helper function: Call Epic FHIR API for Appointment $find (STU3)
+   This operation is a POST that returns potential appointment slots.
+*/
+async function callEpicAPIAppointmentFind(findParameters, accessToken) {
+    try {
+        console.log('Appointment $find Parameters:', findParameters);
+        const response = await axios.post(`${EPIC_STU3_FHIR_URL}/Appointment/$find`, findParameters, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json'
+            }
+        });
+        return response.data;
+    } catch (error) {
+        console.error(
+            'Error calling Epic API (Appointment $find):',
             error.response ? error.response.data : error.message
         );
         throw error;
@@ -211,7 +237,7 @@ app.get('/patient-search', async (req, res) => {
      - date: Appointment date.
      - identifier: Appointment identifier (CSN).
      - status: Appointment status.
-     - service-category: The type of appointment (should be "appointment" if specified).
+     - service-category: The type of appointment (e.g., "appointment" or "surgery").
      ?patient=erXuFYUfucBZaryVksYEcMg3&service-category=appointment&date=2017-10-06
      or category = surgery
 */
@@ -243,8 +269,7 @@ app.get('/appointments', async (req, res) => {
 });
 
 /* GET /scheduled-surgery/:id
-   Allows the client to read a scheduled surgical appointment (read for scheduled surgeries).
-   This endpoint uses the Appointment.Read API, which is designed for scheduled surgical procedures.
+   Allows the client to read a scheduled surgical appointment (using the Appointment.Read API for scheduled surgeries).
 */
 app.get('/scheduled-surgery/:id', async (req, res) => {
     try {
@@ -268,6 +293,69 @@ app.get('/scheduled-surgery/:id', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error retrieving scheduled surgery appointment',
+            error: error.response ? error.response.data : error.message
+        });
+    }
+});
+
+/* POST /appointment-find
+   Allows the client to search for potential appointment slots using the Appointment $find operation (STU3).
+   The client should supply a FHIR Parameters resource (with fields such as patient, startTime, endTime, serviceType, indications, and location-reference).
+*/
+app.post('/appointment-find', async (req, res) => {
+    try {
+        const accessToken = await getAccessToken();
+        console.log('Access Token:', accessToken);
+
+        const findParameters = req.body;
+        console.log('Appointment $find Request Body:', findParameters);
+
+        const findResults = await callEpicAPIAppointmentFind(findParameters, accessToken);
+
+        res.json({
+            success: true,
+            message: 'Appointment $find results retrieved successfully',
+            data: findResults
+        });
+    } catch (error) {
+        console.error('Error in /appointment-find route:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error finding appointment slots',
+            error: error.response ? error.response.data : error.message
+        });
+    }
+});
+
+/* POST /observation
+   Allows the client to create an observation (vital signs) using the Observation.Create API.
+   This endpoint files a vital sign reading to the appropriate flowsheet.
+*/
+app.post('/observation', async (req, res) => {
+    try {
+        const accessToken = await getAccessToken();
+        console.log('Access Token:', accessToken);
+        const observationData = req.body;
+        console.log('Observation Create Request Body:', observationData);
+
+        const response = await axios.post(`${EPIC_FHIR_URL}/Observation`, observationData, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+                Accept: "application/json"
+            }
+        });
+
+        res.status(201).json({
+            success: true,
+            message: "Observation created successfully",
+            data: response.data
+        });
+    } catch (error) {
+        console.error("Error in /observation route:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error creating observation",
             error: error.response ? error.response.data : error.message
         });
     }
