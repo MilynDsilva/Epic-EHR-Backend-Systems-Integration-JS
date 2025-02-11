@@ -330,7 +330,8 @@ app.post('/appointment-find', async (req, res) => {
 /* POST /observation
    Allows the client to create an observation (vital signs) using the Observation.Create API.
    This endpoint files a vital sign reading to the appropriate flowsheet.
-*/
+    https://fhir.epic.com/Sandbox?api=963#1ParamType131069
+   */
 app.post('/observation', async (req, res) => {
     try {
         const accessToken = await getAccessToken();
